@@ -1,0 +1,15 @@
+{
+    "version": "1.1.5",
+    "download_url": "https://github.com/xudevstudio/XU-AIMatic-Writer-Plugin/archive/refs/heads/main.zip",
+    "requires": "6.0",
+    "tested": "6.4",
+    "last_updated": "2025-12-24 12:05:00",
+    "name": "XU-AIMatic Writer",
+    "author": "rankwriter2020",
+    "homepage": "https://github.com/xudevstudio/XU-AIMatic-Writer-Plugin",
+    "sections": {
+        "description": "AI Writer plugin with OpenRouter integration, real-time writing, and direct publishing.",
+        "changelog": "<h4>1.1.5</h4><ul><li>Fixed targetCount bug in image processor.</li><li>Improved updater visibility.</li></ul>"
+    },
+    "upgrade_notice": "v1.1.5: Critical bug fix for image processing."
+}

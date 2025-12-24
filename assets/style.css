@@ -1,0 +1,249 @@
+.aimatic-writer-wrap {
+    max-width: 800px;
+    margin: 20px auto;
+}
+
+.aimatic-writer-container {
+    background: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.aimatic-input-group {
+    margin-bottom: 20px;
+}
+
+.aimatic-input-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.aimatic-input-group input,
+.aimatic-input-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.aimatic-controls {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.aimatic-status {
+    font-style: italic;
+    color: #666;
+}
+
+.aimatic-output-area {
+    margin-bottom: 20px;
+}
+
+.aimatic-output-area label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Editor Toolbar */
+.aimatic-editor-toolbar {
+    background: #f9f9f9;
+    border: 1px solid #e2e4e7;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding: 8px;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.editor-btn {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+    min-width: 32px;
+}
+
+.editor-btn:hover {
+    background: #2271b1;
+    color: #fff;
+    border-color: #2271b1;
+}
+
+.editor-btn:active {
+    transform: scale(0.95);
+}
+
+.toolbar-separator {
+    color: #ddd;
+    margin: 0 4px;
+    font-size: 16px;
+}
+
+.aimatic-editor {
+    height: 500px;
+    overflow-y: auto;
+    border: 1px solid #e2e4e7;
+    border-radius: 0 0 6px 6px;
+    padding: 30px;
+    background: #fff;
+    line-height: 1.6;
+    font-size: 18px;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: #2c3338;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: border-color 0.2s ease;
+}
+
+/* Editor Content Styling */
+.aimatic-editor h1,
+.aimatic-editor h2,
+.aimatic-editor h3,
+.aimatic-editor h4 {
+    margin-top: 0.8em;
+    margin-bottom: 0.4em;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #1d2327;
+}
+
+.aimatic-editor h1 {
+    font-size: 1.8em;
+}
+
+.aimatic-editor h2 {
+    font-size: 1.5em;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3em;
+}
+
+.aimatic-editor h3 {
+    font-size: 1.3em;
+}
+
+.aimatic-editor h4 {
+    font-size: 1.1em;
+}
+
+.aimatic-editor p {
+    margin-bottom: 0.8em;
+    margin-top: 0;
+}
+
+.aimatic-editor ul,
+.aimatic-editor ol {
+    margin-bottom: 0.8em;
+    margin-top: 0.4em;
+    padding-left: 1.5em;
+}
+
+.aimatic-editor li {
+    margin-bottom: 0.3em;
+}
+
+/* Table Styling */
+.aimatic-editor table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    border: 1px solid #ddd;
+    font-size: 16px;
+}
+
+.aimatic-editor th,
+.aimatic-editor td {
+    border: 1px solid #ddd;
+    padding: 12px;
+    text-align: left;
+}
+
+.aimatic-editor th {
+    background-color: #f5f5f5;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.aimatic-editor tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+.aimatic-editor tr:hover {
+    background-color: #f0f0f0;
+}
+
+.aimatic-editor blockquote {
+    border-left: 4px solid #ddd;
+    margin: 1em 0;
+    padding-left: 1em;
+    color: #666;
+}
+
+.aimatic-editor:focus {
+    outline: none;
+    border-color: #2271b1;
+    box-shadow: 0 0 0 1px #2271b1, inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Scrollbar styling */
+.aimatic-editor::-webkit-scrollbar {
+    width: 8px;
+}
+
+.aimatic-editor::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.aimatic-editor::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+.aimatic-editor::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+.aimatic-actions {
+    border-top: 1px solid #eee;
+    padding-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.aimatic-publish-options {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.aimatic-publish-options select,
+.aimatic-publish-options input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+#aimatic-publish-message {
+    font-weight: 600;
+}
+
+#aimatic-publish-message.success {
+    color: #00a32a;
+}
+
+#aimatic-publish-message.error {
+    color: #d63638;
+}
