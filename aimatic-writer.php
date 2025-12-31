@@ -3,7 +3,7 @@
  Plugin Name: XU-AIMatic
  Plugin URI: https://www.fiverr.com/rankwriter2020?public_mode=true
  Description: AI Writer plugin with OpenRouter integration, real-time writing, and direct publishing.
- Version: 1.1.5
+ Version: 1.1.8
  Author: rankwriter2020
  Author URI: https://www.fiverr.com/rankwriter2020?public_mode=true
  License: GPLv2 or later
@@ -46,13 +46,50 @@ function aimatic_writer_enqueue_scripts($hook) {
         return;
     }
 
-    wp_enqueue_style('aimatic-writer-style', AIMATIC_WRITER_URL . 'assets/style.css', array(), '1.1.5');
+    $version = '1.1.8';
+
+    wp_enqueue_style('aimatic-writer-style', AIMATIC_WRITER_URL . 'assets/style.css', array(), $version);
     wp_enqueue_script('marked-js', 'https://cdn.jsdelivr.net/npm/marked/marked.min.js', array(), '4.3.0', true);
-    wp_enqueue_script('aimatic-writer-script', AIMATIC_WRITER_URL . 'assets/script.js', array('jquery', 'marked-js'), '1.1.5', true);
+    wp_enqueue_script('aimatic-writer-script', AIMATIC_WRITER_URL . 'assets/script.js', array('jquery', 'marked-js'), $version, true);
+
+    // Determine Provider and Keys
+    $provider = get_option('aimatic_writer_ai_provider', 'openrouter');
+    $api_key = '';
+    $model_id = '';
+
+    switch ($provider) {
+        case 'openai':
+            $api_key = get_option('aimatic_writer_openai_key');
+            $model_id = get_option('aimatic_writer_openai_model', 'gpt-4o-mini');
+            break;
+        case 'zhipu':
+            $api_key = get_option('aimatic_writer_zhipu_key');
+            $model_id = get_option('aimatic_writer_zhipu_model', 'glm-4-flash');
+            break;
+        case 'gemini':
+            $api_key = get_option('aimatic_writer_gemini_key');
+            $model_id = get_option('aimatic_writer_gemini_model', 'gemini-1.5-flash');
+            break;
+        default: // openrouter
+            $api_key = get_option('aimatic_writer_api_key');
+            $model_id = get_option('aimatic_writer_model_id');
+            break;
+    }
+
+    // Fetch recent posts for Contextual Internal Linking
+    $recent_posts = get_posts(array('numberposts' => 30, 'post_status' => 'publish'));
+    $internal_links_map = array();
+    if ($recent_posts) {
+        foreach ($recent_posts as $p) {
+            $internal_links_map[] = '- [' . $p->post_title . '](' . get_permalink($p->ID) . ')';
+        }
+    }
+    $internal_links_context = implode("\n", $internal_links_map);
 
     wp_localize_script('aimatic-writer-script', 'aimatic_writer_vars', array(
-        'api_key' => get_option('aimatic_writer_api_key'),
-        'model_id' => get_option('aimatic_writer_model_id'),
+        'provider' => $provider,
+        'api_key' => $api_key,
+        'model_id' => $model_id,
         'auto_images' => get_option('aimatic_writer_auto_images'),
         'image_count' => get_option('aimatic_writer_image_count', 3), // Default 3
         'heading_interval' => get_option('aimatic_writer_heading_interval', 2), // Default 2
@@ -61,7 +98,10 @@ function aimatic_writer_enqueue_scripts($hook) {
         'nonce' => wp_create_nonce('aimatic_writer_nonce'),
         'ajax_url' => admin_url('admin-ajax.php'),
         'pollinations_width' => get_option('aimatic_writer_pollinations_width', 1200),
-        'pollinations_height' => get_option('aimatic_writer_pollinations_height', 636)
+        'pollinations_height' => get_option('aimatic_writer_pollinations_height', 636),
+        'site_url' => home_url(),
+        'site_title' => get_bloginfo('name'),
+        'existing_posts' => $internal_links_context // Pass strings for AI prompt
     ));
 }
 add_action('admin_enqueue_scripts', 'aimatic_writer_enqueue_scripts');
@@ -429,7 +469,14 @@ function aimatic_writer_publish_post() {
     }
 
     $title = sanitize_text_field($_POST['title']);
-    $content = wp_kses_post($_POST['content']);
+    // Sanitize content but ALLOW iframes for video embeds
+    if (current_user_can('unfiltered_html')) {
+        $content = $_POST['content']; // Trusted user (Admin/Editor) can post raw HTML (including iframes)
+    } else {
+        $content = wp_kses_post($_POST['content']); 
+        // Note: wp_kses_post usually strips iframes for non-admins, so we prioritize unfiltered for this plugin's users
+    }
+
     $status = isset($_POST['status']) ? sanitize_text_field($_POST['status']) : 'publish';
     $date = isset($_POST['date']) ? sanitize_text_field($_POST['date']) : '';
     

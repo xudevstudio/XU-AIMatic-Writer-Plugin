@@ -1,7 +1,66 @@
 jQuery(document).ready(function ($) {
+    console.log("🚀 AIMatic Script 1.1.7 LOADED - Debug Mode");
+    // alert("AIMatic Debug: Script v1.1.7 Loaded! If you see this, the update worked.");
+
     const apiKey = aimatic_writer_vars.api_key;
     const modelId = aimatic_writer_vars.model_id || 'openai/gpt-3.5-turbo';
     const autoImages = aimatic_writer_vars.auto_images;
+
+    // --- Persistence Logic: Auto-Save Settings ---
+    const persistenceMap = {
+        'aimatic-target-category': 'val',
+        'aimatic-target-author': 'val',
+        'aimatic-max-words': 'val',
+        'aimatic-article-style': 'val',
+        'aimatic-prompt': 'val',       // Custom Instructions
+        'aimatic-post-status': 'val',
+        'aimatic-internal-links': 'check',
+        'aimatic-outbound-links': 'check',
+        'aimatic-read-also': 'check',
+        'aimatic-enable-video': 'check'
+    };
+
+    // 1. Load Saved Settings on Load
+    $.each(persistenceMap, function (id, type) {
+        const saved = localStorage.getItem(id);
+        if (saved !== null) {
+            if (type === 'val') {
+                $('#' + id).val(saved);
+            } else if (type === 'check') {
+                $('#' + id).prop('checked', saved === 'true');
+            }
+        }
+    });
+
+    // 2. Save Settings on Input Change
+    $.each(persistenceMap, function (id, type) {
+        $('#' + id).on('change input paste keyup', function () {
+            const val = type === 'val' ? $(this).val() : $(this).is(':checked');
+            localStorage.setItem(id, val);
+        });
+    });
+
+    // 3. Keep "Advanced Options" Open if it was open
+    const advancedOpen = localStorage.getItem('aimatic-advanced-open');
+    if (advancedOpen === 'true') {
+        $('#aimatic-advanced-options').show();
+    }
+    // Toggle Logic Update (to save state)
+    window.toggleAdvancedOptions = function () {
+        const el = document.getElementById('aimatic-advanced-options');
+        const isHidden = el.style.display === 'none';
+        el.style.display = isHidden ? 'block' : 'none';
+        localStorage.setItem('aimatic-advanced-open', isHidden); // Save new state
+    };
+    // Re-bind the onclick in HTML or just use JQuery here if possible. 
+    // The HTML has onclick="...", so let's override the button behavior or ensuring the global function works.
+    // Simpler: Clean up the HTML button in next step or just attach click event here using jQuery.
+
+    $('.aimatic-wrap button:contains("Show Advanced Options")').attr('onclick', '').on('click', function (e) {
+        e.preventDefault();
+        $('#aimatic-advanced-options').toggle();
+        localStorage.setItem('aimatic-advanced-open', $('#aimatic-advanced-options').is(':visible'));
+    });
     const imageCount = parseInt(aimatic_writer_vars.image_count) || 3;
 
     const generateBtn = $('#aimatic-generate-btn');
@@ -116,7 +175,7 @@ jQuery(document).ready(function ($) {
         }
     }
 
-    async function processImagesInBackground(topic) {
+    async function processImagesInBackground(topic, options = {}) {
         if (imagesProcessing) return;
         imagesProcessing = true;
 
@@ -135,236 +194,183 @@ jQuery(document).ready(function ($) {
             const doc = parser.parseFromString(content, 'text/html');
             const headings = doc.querySelectorAll('h2, h3');
 
-            if (headings.length === 0) {
-                console.log('No headings found, using topic');
-                updateProgress('No headings found. Using topic...', 100);
-                await new Promise(r => setTimeout(r, 1000));
-                return;
-            }
+            // --- Images Logic ---
+            // Proceed only if Global Auto Images is ON (we assume the user wants images if they enabled the plugin feature)
+            // But we can also add a specific toggle for images if needed. For now, we stick to Global.
+            if (autoImages == 1) {
 
-            // Limit to max images setting
-            // Limit to max images setting (Global)
-            const maxImages = parseInt(aimatic_writer_vars.image_count) || 3;
-            const interval = parseInt(aimatic_writer_vars.heading_interval) || 2;
+                if (headings.length === 0) {
+                    console.log('No headings found, using topic');
+                    updateProgress('No headings found. Using topic...', 100);
+                    await new Promise(r => setTimeout(r, 1000));
+                    // If no headings, we skip image insertion logic based on headings, 
+                    // but we might want one hero image?
+                } else {
 
-            // Filter Headings by Interval
-            let validHeadings = [];
-            for (let i = 0; i < headings.length; i++) {
-                // Interval Logic: (index + 1) % interval === 0
-                // e.g. Interval 2 -> Index 1 (2nd), 3 (4th)...
-                if ((i + 1) % interval === 0) {
-                    validHeadings.push({
-                        headingText: headings[i].textContent.trim(),
-                        index: i
-                    });
-                }
-            }
+                    // Limit to max images setting (Global)
+                    const maxImages = parseInt(aimatic_writer_vars.image_count) || 3;
+                    const interval = parseInt(aimatic_writer_vars.heading_interval) || 2;
 
-            // Limit valid slots to maxImages
-            // Note: If we have fewer slots than maxImages (e.g. short article), we just use what we have.
-            let imagesToProcess = validHeadings.slice(0, maxImages);
-
-            // If no valid headings found via interval (short article?), pick at least one (middle) if maxImages > 0
-            if (imagesToProcess.length === 0 && headings.length > 0 && maxImages > 0) {
-                const mid = Math.floor(headings.length / 2);
-                imagesToProcess.push({
-                    headingText: headings[mid].textContent.trim(),
-                    index: mid
-                });
-            }
-
-            // Sort back by index to process in order (makes progress bar look logical)
-            imagesToProcess.sort((a, b) => a.index - b.index);
-
-            console.log(`Found ${headings.length} headings. Targeted ${imagesToProcess.length} images. Processing:`, imagesToProcess);
-
-            let processedCount = 0;
-            const total = imagesToProcess.length;
-
-            // Process sequentially
-            for (let i = 0; i < total; i++) {
-                const item = imagesToProcess[i];
-                const percent = Math.round((i / total) * 100);
-
-                status.text(`Generating image ${i + 1}/${total}: "${item.headingText}"...`);
-                updateProgress(`Generating image for: "${item.headingText}"...`, percent);
-
-                try {
-                    // 1. Generate/Fetch Image URL
-                    const fetchResponse = await $.post(aimatic_writer_vars.ajax_url, {
-                        action: 'aimatic_writer_fetch_images',
-                        nonce: aimatic_writer_vars.nonce,
-                        query: item.headingText,
-                        count: 1
-                    });
-
-                    if (!fetchResponse.success || !fetchResponse.data || fetchResponse.data.length === 0) {
-                        console.log(`Failed to generate image for "${item.headingText}":`, fetchResponse);
-                        updateProgress(`❌ Failed to find image for "${item.headingText}". Skipping.`, percent);
-                        continue;
-                    }
-
-                    const imageUrl = fetchResponse.data[0].url;
-
-                    // 2. Upload to Media Library (Sideload)
-                    status.text(`Uploading image ${i + 1}/${total}...`);
-                    updateProgress(`Uploading image to library...`, percent + (50 / total)); // Add a bit visual progress
-
-                    const uploadResponse = await $.post(aimatic_writer_vars.ajax_url, {
-                        action: 'aimatic_writer_upload_image',
-                        nonce: aimatic_writer_vars.nonce,
-                        image_url: imageUrl,
-                        alt_text: item.headingText
-                    });
-
-                    if (uploadResponse.success) {
-                        const attachment = uploadResponse.data;
-                        uploadedImages.push(attachment.id);
-
-                        // Set first image as featured
-                        if (!featuredImageId) {
-                            featuredImageId = attachment.id;
+                    // Filter Headings by Interval
+                    let validHeadings = [];
+                    for (let i = 0; i < headings.length; i++) {
+                        if ((i + 1) % interval === 0) {
+                            validHeadings.push({
+                                headingText: headings[i].textContent.trim(),
+                                index: i
+                            });
                         }
-
-                        // 3. Insert into Editor
-                        insertImageAfterHeadingText(item.headingText, attachment.url, item.headingText);
-                        processedCount++;
-
-                        updateProgress(`✅ Image added!`, percent + (100 / total));
-
-                        // Small delay to be safe
-                        await new Promise(r => setTimeout(r, 500));
-
-                    } else {
-                        console.error(`Upload failed for "${item.headingText}":`, uploadResponse);
-                        updateProgress(`❌ Upload failed for "${item.headingText}".`, percent);
                     }
 
-                } catch (error) {
-                    console.error(`Error processing image for "${item.headingText}":`, error);
-                    updateProgress(`❌ Error processing image.`, percent);
-                }
-            }
+                    // Limit valid slots to maxImages
+                    let imagesToProcess = validHeadings.slice(0, maxImages);
 
-            status.text(`Added ${processedCount} generated images.`);
-            updateProgress(`🎉 Images added: ${processedCount}. Checking for video...`, 90);
+                    // If no valid headings found via interval, pick at least one
+                    if (imagesToProcess.length === 0 && headings.length > 0 && maxImages > 0) {
+                        const mid = Math.floor(headings.length / 2);
+                        imagesToProcess.push({
+                            headingText: headings[mid].textContent.trim(),
+                            index: mid
+                        });
+                    }
+
+                    // Sort back by index
+                    imagesToProcess.sort((a, b) => a.index - b.index);
+
+                    let processedCount = 0;
+                    const total = imagesToProcess.length;
+
+                    for (let i = 0; i < total; i++) {
+                        const item = imagesToProcess[i];
+                        const percent = Math.round((i / total) * 100);
+
+                        status.text(`Generating image ${i + 1}/${total}: "${item.headingText}"...`);
+                        updateProgress(`Generating image for: "${item.headingText}"...`, percent);
+
+                        try {
+                            const fetchResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                                action: 'aimatic_writer_fetch_images',
+                                nonce: aimatic_writer_vars.nonce,
+                                query: item.headingText,
+                                count: 1
+                            });
+
+                            if (!fetchResponse.success || !fetchResponse.data || fetchResponse.data.length === 0) {
+                                updateProgress(`❌ Failed to find image for "${item.headingText}". Skipping.`, percent);
+                                continue;
+                            }
+
+                            const imageUrl = fetchResponse.data[0].url;
+
+                            status.text(`Uploading image ${i + 1}/${total}...`);
+                            updateProgress(`Uploading image to library...`, percent + (50 / total));
+
+                            const uploadResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                                action: 'aimatic_writer_upload_image',
+                                nonce: aimatic_writer_vars.nonce,
+                                image_url: imageUrl,
+                                alt_text: item.headingText
+                            });
+
+                            if (uploadResponse.success) {
+                                const attachment = uploadResponse.data;
+                                uploadedImages.push(attachment.id);
+
+                                if (!featuredImageId) {
+                                    featuredImageId = attachment.id;
+                                    console.log('Featured Image Set:', featuredImageId);
+                                }
+
+                                insertImageAfterHeadingText(item.headingText, attachment.url, item.headingText);
+                                processedCount++;
+
+                                updateProgress(`✅ Image added!`, percent + (100 / total));
+                                await new Promise(r => setTimeout(r, 500));
+
+                            } else {
+                                console.error(`Upload failed`, uploadResponse);
+                                updateProgress(`❌ Upload failed.`, percent);
+                            }
+
+                        } catch (error) {
+                            console.error(`Error processing image`, error);
+                            updateProgress(`❌ Error processing image.`, percent);
+                        }
+                    }
+
+                    status.text(`Added ${processedCount} generated images.`);
+                }
+            } // End Auto Images
+
+            updateProgress(`🎉 Images done. Checking for video...`, 90);
 
             // --- Video Processing ---
-            // Simply check a variable or just try to insert one video if enabled.
-            // We don't have a direct "video enabled" var passed to JS easily visible here, 
-            // but we can try if there is a Youtube Key.
-            // Let's assume we want 1 video if possible.
+            // Now strictly controlled by options.enableVideo
+            if (options.enableVideo) {
+                try {
+                    updateProgress(`Searching for related video...`, 92);
 
-            try {
-                updateProgress(`Searching for related video...`, 92);
+                    let searchQuery = topic.replace(/^(How to|Guide to|Best|Top \d+)\s+/i, '');
+                    const videoCount = parseInt(aimatic_writer_vars.video_count) || 1;
 
-                let searchQuery = topic;
-                // Try to simplify query for better results
-                searchQuery = searchQuery.replace(/^(How to|Guide to|Best|Top \d+)\s+/i, '');
+                    // Force at least 1 video if enabled
+                    let loopCount = Math.max(videoCount, 1);
+                    let insertedCount = 0;
 
-                // Fetch Video
-                const videoCount = parseInt(aimatic_writer_vars.video_count) || 1;
-                let insertedCount = 0;
+                    for (let v = 0; v < loopCount; v++) {
+                        const videoResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                            action: 'aimatic_writer_fetch_video',
+                            nonce: aimatic_writer_vars.nonce,
+                            query: searchQuery + (v > 0 ? " part " + (v + 1) : "")
+                        });
 
-                // Loop for multiple videos
-                for (let v = 0; v < videoCount; v++) {
-                    const videoResponse = await $.post(aimatic_writer_vars.ajax_url, {
-                        action: 'aimatic_writer_fetch_video',
-                        nonce: aimatic_writer_vars.nonce,
-                        query: searchQuery + (v > 0 ? " part " + (v + 1) : "") // Vary query slightly? Or just fetch next?
-                        // Provider should handle multiple? Current fetch_video only returns 1.
-                        // We might need to handle this better in backend or just call it multiple times.
-                        // For now, let's just try to insert.
-                    });
+                        if (videoResponse.success && videoResponse.data) {
+                            // Normalize response (single vs array?)
+                            // Current PHP fetch_video returns {video_id, embed_html} for single
+                            // We need to support multiple?
+                            // Let's stick to the existing response format which seems single.
+                            // If we want multiple, we need to change PHP or make multiple unique calls.
+                            // For this patch, let's just insert what we get.
 
-                    if (videoResponse.success && videoResponse.data && videoResponse.data.length > 0) {
-                        const videoId = videoResponse.data[0].id.videoId;
-                        const embedHtml = `<iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+                            const embedHtml = videoResponse.data.embed_html;
+                            if (embedHtml) {
+                                const editor = getEditor();
+                                if (editor) {
+                                    let content = editor.getContent();
+                                    // Append to bottom for safety, or smart insert?
+                                    // User complained about "not linking". 
+                                    // Let's append firmly at the bottom for now to ensure visibility.
 
-                        // Insert Logic (Spread them out)
-                        const editor = getEditor();
-                        if (editor) {
-                            let content = editor.getContent();
-                            // Simple insertion logic: Append or split
-                            // For V1: Append to end if not smart
-                            // Smart: Split by paragraphs.
-                            const parts = content.split('</p>');
+                                    const videoBlock = `<div class="aimatic-video-embed" style="margin: 30px auto; text-align:center;"><h3>Related Video</h3>${embedHtml}</div>`;
+                                    editor.setContent(content + videoBlock);
 
-                            // Distribute: If 3 videos and 10 paras -> insert at 3, 6, 9
-                            const totalParas = parts.length;
-                            const idealPos = Math.floor(totalParas / (videoCount + 1)) * (v + 1);
-
-                            if (idealPos < totalParas && parts[idealPos]) {
-                                parts[idealPos] = parts[idealPos] + '</p><div class="aimatic-video-embed" style="margin: 20px 0;">' + embedHtml + '</div>';
-                                editor.setContent(parts.join('</p>'));
-                                insertedCount++;
-                            } else {
-                                // Fallback append
-                                editor.setContent(content + '<div class="aimatic-video-embed" style="margin: 20px 0;">' + embedHtml + '</div>');
-                                insertedCount++;
+                                    insertedCount++;
+                                    updateProgress(`✅ Video inserted!`, 98);
+                                }
                             }
+                        } else {
+                            console.log('No video found:', videoResponse);
                         }
                     }
-                }
 
-                if (videoResponse.success && videoResponse.data.embed_html) {
-                    const embedHtml = videoResponse.data.embed_html;
-                    updateProgress(`✅ Found video! Inserting...`, 95);
-
-                    const editor = getEditor();
-                    if (editor) {
-                        const content = editor.getContent();
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(content, 'text/html');
-
-                        // Try to insert after 2nd H2
-                        const headings = doc.querySelectorAll('h2');
-                        let inserted = false;
-
-                        if (headings.length >= 2) {
-                            // Insert before 2nd heading (i.e., in the middle)
-                            const target = headings[Math.floor(headings.length / 2)];
-                            // Can't easily manipulate editor DOM like this without re-serializing.
-                            // Simpler approach: String manipulation or append if complex.
-                        }
-
-                        // Fallback: Append after first 3 paragraphs
-                        const paragraphs = doc.querySelectorAll('p');
-                        if (paragraphs.length > 3) {
-                            // Let's use string split for safety
-                            const parts = content.split('</p>');
-                            if (parts.length > 3) {
-                                parts[2] = parts[2] + '</p><div class="aimatic-video-embed" style="margin: 20px 0;">' + embedHtml + '</div>';
-                                editor.setContent(parts.join('</p>'));
-                                inserted = true;
-                            }
-                        }
-
-                        if (!inserted) {
-                            // Valid fallback: Append to bottom
-                            editor.setContent(content + '<div class="aimatic-video-embed" style="margin: 20px 0;"><h3>Related Video</h3>' + embedHtml + '</div>');
-                        }
-
-                        updateProgress(`✅ Video inserted.`, 98);
+                    if (insertedCount === 0) {
+                        updateProgress(`⚠️ No video found for "${searchQuery}".`, 95);
                     }
-                } // End loop
 
-                if (insertedCount === 0) {
-                    console.log('No video found:', videoResponse);
-                    updateProgress(`⚠️ No video found for "${searchQuery}".`, 95);
+                } catch (videoError) {
+                    console.error('Video error:', videoError);
+                    updateProgress(`⚠️ Video search failed.`, 95);
                 }
-
-            } catch (videoError) {
-                console.error('Video error:', videoError);
-                updateProgress(`⚠️ Video search failed.`, 95);
+            } else {
+                updateProgress(`ℹ️ Video disabled.`, 95);
             }
 
             updateProgress(`🎉 All Done!`, 100);
-            await new Promise(r => setTimeout(r, 1000)); // Show 100% for a second
+            await new Promise(r => setTimeout(r, 1000));
 
         } catch (fatalError) {
-            console.error('Fatal error in image processing:', fatalError);
-            alert('Something went wrong processing images: ' + fatalError.message);
+            console.error('Fatal error in media processing:', fatalError);
+            alert('Something went wrong processing media: ' + fatalError.message);
         } finally {
             finishImageProcessing();
             hideProgressModal();
@@ -410,7 +416,7 @@ jQuery(document).ready(function ($) {
         const internalLinks = $('#aimatic-internal-links').is(':checked');
         const outboundLinks = $('#aimatic-outbound-links').is(':checked');
         const readAlso = $('#aimatic-read-also').is(':checked');
-        // Video is handled post-generation
+        const enableVideo = $('#aimatic-enable-video').is(':checked');
 
         if (maxWords && parseInt(maxWords) < 300) {
             alert('Maximum word count must be at least 300.');
@@ -450,50 +456,132 @@ jQuery(document).ready(function ($) {
 
         console.log('=== AIMatic Writer Started ===');
 
-        const systemPrompt = "You are a professional article writer. Write a comprehensive, well-structured article using Markdown formatting (e.g., # for headings, - for lists, **bold**). Do NOT use HTML tags. Just pure Markdown text. IMPORTANT: Do NOT include the Main Title (H1) at the beginning of the article. Start directly with the Introduction.";
-
-        let advancedInstructions = "";
-
-        // Article Style Map
+        // Style Map Definition
         const styleMap = {
-            'generic': "Write a standard, well-structured blog post.",
-            'how-to': "Write a Step-by-Step How-To Guide/Tutorial. Use numbered steps (H2/H3) and clear instructions.",
-            'listicle': "Write a Listicle (e.g., Top 10). Use H2 for each item. Make it scannable.",
-            'informative': "Write an in-depth Informative/Educational article explaining the topic clearly.",
-            'guide': "Write an Ultimate Guide. Be extremely comprehensive, covering all aspects. Long-form.",
-            'comparison': "Write a Comparison article (X vs Y). Use tables if possible (markdown tables) and pros/cons lists.",
-            'review': "Write a Product/Service Review. detailed analysis, features, pros and cons, and verdict.",
-            'trend': "Write a News/Trend update. Focus on what's new, why it matters, and future implications.",
-            'case-study': "Write a Case Study style article. Focus on problem, solution, and results.",
-            'editorial': "Write an Opinion/Editorial piece. Express a strong, expert viewpoint.",
-            'faq': "Write in an FAQ format. Use questions as Headings and provide direct answers."
+            'generic': "Standard Blog Post",
+            'how-to': "Step-by-Step How-To Guide (Numbered Steps)",
+            'listicle': "Listicle (Top 10 style)",
+            'informative': "Deep Dive Educational Article",
+            'guide': "Ultimate Guide (Comprehensive)",
+            'comparison': "Comparison (X vs Y)",
+            'review': "Product Review",
+            'trend': "News/Trend Analysis",
+            'case-study': "Case Study",
+            'editorial': "Opinion Piece",
+            'faq': "FAQ Format"
         };
 
-        if (styleMap[articleStyle] && articleStyle !== 'generic') {
-            advancedInstructions += `\nSTYLE: ${styleMap[articleStyle]}`;
-        }
+        // --- CONSTRUCT SYSTEM PROMPT (STRICT CONSTRAINTS) ---
+        let systemDirectives = [
+            "You are a professional article writer.",
+            "Write ONLY in pure Markdown.",
+            "Do NOT use HTML tags.",
+            "Do NOT include the Main Title H1 at the start."
+        ];
 
+        // 1. WORD COUNT (Strict)
         if (maxWords) {
-            advancedInstructions += `\nTARGET LENGTH: Approximately ${maxWords} words.`;
+            systemDirectives.push(`CRITICAL: You MUST write approximately ${maxWords} words. Do not be lazy. Write a full, long-form article.`);
         }
 
-        if (internalLinks) advancedInstructions += `\n- Include relevant internal links if context allows (placeholder format: [Link Text](#)).`;
-        if (outboundLinks) advancedInstructions += `\n- Include relevant outbound citations/links to authoritative sources.`;
-        if (readAlso) advancedInstructions += `\n- Include a 'Read Also' section at the end with 3-4 related placeholder topics.`;
+        // 2. ARTICLE STYLE
+        if (styleMap[articleStyle] && articleStyle !== 'generic') {
+            systemDirectives.push(`STYLE: The user wants a "${styleMap[articleStyle]}". Adhere strictly to this format.`);
+        }
 
-        const userPrompt = `Topic: ${topic}\n${customPrompt ? 'Instructions: ' + customPrompt : ''}\n${advancedInstructions}`;
+        // Detect Link Counts (Outer Scope)
+        let intLinkCount = "5-7";
+        if (parseInt(maxWords) >= 1500) intLinkCount = "10-12";
+        else if (parseInt(maxWords) >= 1000) intLinkCount = "7-9";
+
+        let outLinkCount = "3-4";
+        if (parseInt(maxWords) >= 1500) outLinkCount = "6-8";
+        else if (parseInt(maxWords) >= 800) outLinkCount = "4-5";
+
+        // 3. INTERNAL LINKS (Context Aware)
+        if (internalLinks) {
+
+            systemDirectives.push(`INTERNAL LINKS (BODY): You MUST include ${intLinkCount} internal links to other articles embedded naturally in the body text.`);
+            systemDirectives.push(`LINK PLACEMENT: Distribute these ${intLinkCount} links evenly from Introduction to Conclusion. Insert them into random paragraphs. Do NOT clump them.`);
+
+
+            if (aimatic_writer_vars.existing_posts && aimatic_writer_vars.existing_posts.length > 20) {
+                systemDirectives.push(`LINK CONTEXT: Here are the ONLY valid internal URLs you can use. Pick ${intLinkCount} relevant ones and link them naturally in the text:\n${aimatic_writer_vars.existing_posts}`);
+            } else {
+                const homeUrl = aimatic_writer_vars.site_url;
+                systemDirectives.push(`LINK FORMAT: Use [Keyword](${homeUrl}/keyword-slug/).`);
+            }
+        }
+
+        // 4. OUTBOUND LINKS
+        if (outboundLinks) {
+
+            systemDirectives.push(`EXTERNAL LINKS: You MUST include ${outLinkCount} citations to high-authority domains (Wikipedia, BBC, Forbes, etc). Real URLs only.`);
+        }
+
+        // 5. READ ALSO
+        if (readAlso) {
+            systemDirectives.push("READ ALSO SECTION: Add a separate 'Read Also' section at the end with 3 distinct links. (NOTE: These do NOT count towards the Internal Links limit above).");
+        }
+
+        // 6. CUSTOM INSTRUCTIONS (Highest Priority)
+        if (customPrompt && customPrompt.trim() !== "") {
+            systemDirectives.push(`USER SPECIAL INSTRUCTIONS (OVERRIDE ALL ELSE): ${customPrompt}`);
+        }
+
+        const finalSystemPrompt = systemDirectives.join("\n\n");
+
+        // --- REDUNDANT USER PROMPT (Forcing AI compliance) ---
+        let userDirectives = [`TOPIC: ${topic}`];
+
+        if (maxWords) userDirectives.push(`(Length: ~${maxWords} words)`);
+
+        if (internalLinks) {
+            const homeUrl = aimatic_writer_vars.site_url;
+            userDirectives.push(`IMPORTANT: You must include ${intLinkCount} internal links to ${homeUrl} in the body (excluding 'Read Also').`);
+            if (aimatic_writer_vars.existing_posts && aimatic_writer_vars.existing_posts.length > 5) {
+                userDirectives.push("(Check System Prompt for list of valid URLs to use)");
+            }
+        }
+
+        if (outboundLinks) {
+            userDirectives.push("IMPORTANT: Include 4+ external citations (Wikipedia/News).");
+        }
+
+        const userPrompt = userDirectives.join("\n") + "\n\nStart writing the article now:";
+
+        console.log('📝 System Prompt:', finalSystemPrompt);
+        console.log('📝 User Prompt:', userPrompt);
+        console.log('🔗 Internal Links Enabled:', internalLinks);
+        console.log('🔗 Existing Posts Available:', aimatic_writer_vars.existing_posts ? aimatic_writer_vars.existing_posts.length : 0);
+
+        let apiUrl = "https://openrouter.ai/api/v1/chat/completions";
+        if (aimatic_writer_vars.provider === 'openai') {
+            apiUrl = "https://api.openai.com/v1/chat/completions";
+        } else if (aimatic_writer_vars.provider === 'zhipu') {
+            apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+        }
+
+        console.log('📡 Calling AI Provider:', {
+            provider: aimatic_writer_vars.provider,
+            url: apiUrl,
+            model: modelId,
+            site: aimatic_writer_vars.site_url
+        });
 
         try {
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            const response = await fetch(apiUrl, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": aimatic_writer_vars.site_url,
+                    "X-Title": aimatic_writer_vars.site_title
                 },
                 body: JSON.stringify({
                     "model": modelId,
                     "messages": [
-                        { "role": "system", "content": systemPrompt },
+                        { "role": "system", "content": finalSystemPrompt },
                         { "role": "user", "content": userPrompt }
                     ],
                     "stream": true
@@ -510,13 +598,17 @@ jQuery(document).ready(function ($) {
             const decoder = new TextDecoder("utf-8");
             let fullMarkdown = "";
             let wordCount = 0;
+            let buffer = "";
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split("\n");
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+
+                // Keep the last partial line in the buffer
+                buffer = lines.pop();
 
                 for (const line of lines) {
                     if (line.startsWith("data: ")) {
@@ -532,24 +624,19 @@ jQuery(document).ready(function ($) {
                                 wordCount = fullMarkdown.split(/\s+/).filter(w => w.length > 0).length;
                                 status.text(`Writing... (${wordCount} words)`);
 
-                                if (typeof marked === 'undefined') {
-                                    console.error('❌ marked.js not loaded!');
-                                    setEditorContent(fullMarkdown);
-                                    continue;
+                                // Only update editor occasionally or at end to save performance? 
+                                // For now, keep real-time but maybe throttle?
+
+                                // Simple markdown to html
+                                if (typeof marked !== 'undefined') {
+                                    let cleanMarkdown = fullMarkdown.replace(/^#\s+.+\n/g, '');
+                                    cleanMarkdown = cleanMarkdown.replace(/^\s*#\s+[^\n]+\n/g, '');
+                                    let html = marked.parse(cleanMarkdown);
+                                    html = html.replace(/<h1[^>]*>.*?<\/h1>/gi, '');
+                                    setEditorContent(html);
                                 }
 
-                                // Clean up Markdown - Remove H1 Titles if AI adds them
-                                let cleanMarkdown = fullMarkdown.replace(/^#\s+.+\n/g, ''); // Remove "# Title" at start
-                                cleanMarkdown = cleanMarkdown.replace(/^\s*#\s+[^\n]+\n/g, ''); // Remove if there are leading spaces
-
-                                let html = marked.parse(cleanMarkdown);
-
-                                // Clean up HTML - Double check for H1
-                                html = html.replace(/<h1[^>]*>.*?<\/h1>/gi, '');
-
-                                setEditorContent(html);
-
-                                // Auto-scroll to keep new content visible
+                                // Auto-scroll
                                 setTimeout(() => {
                                     const iframe = document.getElementById('aimatic_editor_ifr');
                                     if (iframe && iframe.contentWindow) {
@@ -557,9 +644,10 @@ jQuery(document).ready(function ($) {
                                     }
                                 }, 50);
                             }
-
                         } catch (e) {
-                            console.error("Parse error:", e);
+                            // JSON Parse error is expected for partial chunks if buffer logic fails, 
+                            // but with buffer logic it should be rare.
+                            console.error("Stream parse error:", e);
                         }
                     }
                 }
@@ -570,13 +658,11 @@ jQuery(document).ready(function ($) {
             articleComplete = true;
             generateBtn.prop('disabled', false);
 
-            // Start image processing AFTER article is complete
-            if (autoImages == 1) {
-                console.log('🚀 Starting image processing after article completion...');
-                processImagesInBackground(topic);
-            } else {
-                checkIfReadyToPublish();
-            }
+            console.log('🚀 Starting media processing...');
+            processImagesInBackground(topic, {
+                enableVideo: enableVideo,
+                videoCount: 1
+            });
 
         } catch (error) {
             console.error(error);
@@ -584,6 +670,170 @@ jQuery(document).ready(function ($) {
             generateBtn.prop('disabled', false);
         }
     });
+
+    // --- Robust Media Insertion ---
+
+    async function processImagesInBackground(topic, options = {}) {
+        if (imagesProcessing) return;
+        imagesProcessing = true;
+
+        status.text('Generating images...');
+        showProgressModal();
+
+        try {
+            const editor = getEditor();
+            if (!editor) { console.error('No editor'); return; }
+
+            // We must work with the HTML string or DOM. 
+            // Using logic on the live DOM is risky if user is typing, but here it's auto-process.
+            // Let's rely on Editor Content String -> DOMParser (safe) -> Manipulate -> SetBack.
+
+            let content = editor.getContent();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(content, 'text/html');
+
+            // Find all h2/h3 elements
+            const headings = Array.from(doc.querySelectorAll('h2, h3'));
+            let modified = false;
+
+            // --- Image Insertion Logic ---
+            if (autoImages == 1 && headings.length > 0) {
+                const maxImages = parseInt(aimatic_writer_vars.image_count) || 3;
+                const interval = parseInt(aimatic_writer_vars.heading_interval) || 2;
+
+                let imagesUsed = 0;
+
+                for (let i = 0; i < headings.length; i++) {
+                    if (imagesUsed >= maxImages) break;
+
+                    // Interval check (every Nth heading)
+                    if ((i + 1) % interval !== 0) continue;
+
+                    const hNode = headings[i];
+                    const headingText = hNode.textContent.trim();
+                    if (!headingText) continue;
+
+                    status.text(`Generating image for: ${headingText}...`);
+
+                    // Generate Image
+                    try {
+                        const fetchResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                            action: 'aimatic_writer_fetch_images',
+                            nonce: aimatic_writer_vars.nonce,
+                            query: headingText,
+                            count: 1
+                        });
+
+                        if (fetchResponse.success && fetchResponse.data && fetchResponse.data.length > 0) {
+                            const imageUrl = fetchResponse.data[0].url;
+
+                            const uploadResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                                action: 'aimatic_writer_upload_image',
+                                nonce: aimatic_writer_vars.nonce,
+                                image_url: imageUrl,
+                                alt_text: headingText
+                            });
+
+                            if (uploadResponse.success) {
+                                const attachment = uploadResponse.data;
+                                uploadedImages.push(attachment.id);
+                                if (!featuredImageId) featuredImageId = attachment.id;
+
+                                // Create Image Node
+                                const imgDiv = doc.createElement('div');
+                                imgDiv.className = 'aimatic-image-wrapper';
+                                imgDiv.style.textAlign = 'center';
+                                imgDiv.style.margin = '20px 0';
+                                imgDiv.innerHTML = `<img src="${attachment.url}" alt="${headingText}" class="aligncenter size-large" style="max-width: 100%; height: auto;" />`;
+
+                                // Insert AFTER the heading
+                                if (hNode.nextSibling) {
+                                    hNode.parentNode.insertBefore(imgDiv, hNode.nextSibling);
+                                } else {
+                                    hNode.parentNode.appendChild(imgDiv);
+                                }
+
+                                imagesUsed++;
+                                modified = true;
+                                updateProgress(`✅ Image added after "${headingText}"`, (imagesUsed / maxImages) * 80);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Image Gen Error', err);
+                    }
+                }
+            }
+
+            // --- Video Insertion Logic ---
+            if (options.enableVideo) {
+                updateProgress('Finding Video...', 90);
+                try {
+                    // Smart Placement: Find "Middle" paragraph
+                    const paragraphs = Array.from(doc.querySelectorAll('p'));
+
+                    if (paragraphs.length > 3) {
+                        let searchQuery = topic.replace(/^(How to|Guide to|Best|Top \d+)\s+/i, '');
+                        const videoResponse = await $.post(aimatic_writer_vars.ajax_url, {
+                            action: 'aimatic_writer_fetch_video',
+                            nonce: aimatic_writer_vars.nonce,
+                            query: searchQuery
+                        });
+
+                        if (videoResponse.success && videoResponse.data && videoResponse.data.embed_html) {
+                            const embedHtml = videoResponse.data.embed_html;
+
+                            // Insert at roughly 60% of the article
+                            const targetIndex = Math.floor(paragraphs.length * 0.6);
+                            const pNode = paragraphs[targetIndex];
+
+                            const vidDiv = doc.createElement('div');
+                            vidDiv.className = 'aimatic-video-embed';
+                            vidDiv.style.textAlign = 'center';
+                            vidDiv.style.margin = '30px auto';
+                            vidDiv.innerHTML = `${embedHtml}`; // Removed Heading
+
+                            if (pNode.nextSibling) {
+                                pNode.parentNode.insertBefore(vidDiv, pNode.nextSibling);
+                            } else {
+                                pNode.parentNode.appendChild(vidDiv);
+                            }
+                            modified = true;
+                            updateProgress('✅ Video inserted at middle of article.', 95);
+                        }
+                    }
+                } catch (err) {
+                    console.log('Video error', err);
+                }
+            }
+
+            // --- Apply Changes ---
+            if (modified) {
+                // Serialize back to string
+                const serializer = new XMLSerializer();
+                // body content only
+                const newContent = doc.body ? doc.body.innerHTML : serializer.serializeToString(doc); // XMLSerializer might serialize full doc?
+                // Actually DOMParser 'text/html' gives a full doc. We want innerHTML of body.
+                editor.setContent(doc.body.innerHTML);
+            }
+
+            updateProgress('🎉 All Media Processed!', 100);
+            await new Promise(r => setTimeout(r, 1000));
+
+        } catch (fatalError) {
+            console.error('Fatal error in media processing:', fatalError);
+            alert('Something went wrong processing media: ' + fatalError.message);
+        } finally {
+            finishImageProcessing();
+            hideProgressModal();
+        }
+    }
+
+    // REMOVED old processImagesInBackground and insertImageAfterHeadingText
+    // This function replaces BOTH.
+
+    function insertImageAfterHeadingText(headingText, imageUrl, altText) {
+        // Deprecated dummy to prevent errors if called elsewhere
+    }
 
     $('#aimatic-post-status').on('change', function () {
         if ($(this).val() === 'future') {
